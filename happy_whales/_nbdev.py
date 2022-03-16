@@ -2,9 +2,13 @@
 
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
-index = {}
+index = {"HappyWhalesDataset": "data.ipynb",
+         "map_per_image": "metrics.ipynb",
+         "map_per_set": "metrics.ipynb"}
 
-modules = []
+modules = ["data.py",
+           "metrics.py",
+           "model.py"]
 
 doc_url = "https://pawlowskipawel.github.io/happy_whales/"
 
