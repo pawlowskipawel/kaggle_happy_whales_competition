@@ -1,0 +1,1 @@
+# kaggle_happy_whales_competition
