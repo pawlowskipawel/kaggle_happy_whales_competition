@@ -7,6 +7,7 @@ from torch.utils.data import Dataset
 import numpy as np
 import torch
 import cv2
+import os
 
 # Cell
 def extract_top_n_classes(df, num_classes):
@@ -22,13 +23,14 @@ def extract_top_n_classes(df, num_classes):
 
 # Cell
 class HappyWhalesDataset(Dataset):
-    def __init__(self, df, image_shape, normalization='imagenet'):
+    def __init__(self, df, image_shape, bbox_dict=None, normalization='imagenet'):
         super().__init__()
 
         self.df = df
         self.normalization = normalization
         self.num_examples = len(df.index)
         self.image_shape = image_shape
+        self.bbox_dict = bbox_dict
 
     def _normalize_image(self, image):
         image = (image / 255.).astype(np.float32)
@@ -49,10 +51,19 @@ class HappyWhalesDataset(Dataset):
     def __getitem__(self, index):
 
         image_path = self.df.iloc[index, 0]
+        image_name = os.path.split(image_path)[-1]
+
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image = cv2.resize(image, self.image_shape)
 
+        if self.bbox_dict:
+            bbox = self.bbox_dict[image_name]
+            xmin, ymin, xmax, ymax = bbox
+            print(bbox)
+            image = image[ymin: ymax, xmin: xmax]
+            print(image)
+
+        image = cv2.resize(image, self.image_shape)
         image = self._normalize_image(image)
 
         label = self.df.iloc[index, 2]
