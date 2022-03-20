@@ -59,9 +59,7 @@ class HappyWhalesDataset(Dataset):
         if self.bbox_dict:
             bbox = self.bbox_dict[image_name]
             xmin, ymin, xmax, ymax = bbox
-            print(bbox)
             image = image[ymin: ymax, xmin: xmax]
-            print(image)
 
         image = cv2.resize(image, self.image_shape)
         image = self._normalize_image(image)
