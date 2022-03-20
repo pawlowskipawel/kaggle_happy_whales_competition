@@ -40,8 +40,8 @@ class HappyWhalesDataset(Dataset):
             stds = np.array([0.229, 0.224, 0.225], dtype=np.float32)
 
             image[0] = (image[0] - means[0]) / stds[0]
-            image[1] = (image[1] - means[1]) / stds[2]
-            image[2] = (image[2] - means[2]) / stds[1]
+            image[1] = (image[1] - means[1]) / stds[1]
+            image[2] = (image[2] - means[2]) / stds[2]
 
         return image.astype(np.float32)
 
@@ -65,8 +65,10 @@ class HappyWhalesDataset(Dataset):
         image = self._normalize_image(image)
 
         label = self.df.iloc[index, 2]
+        species = self.df.iloc[index, 1]
 
         return {
             "image": torch.tensor(image, dtype=torch.float).permute(2, 0, 1),
+            "species": torch.tensor(species, dtype=torch.long),
             "label": torch.tensor(label, dtype=torch.long)
         }
