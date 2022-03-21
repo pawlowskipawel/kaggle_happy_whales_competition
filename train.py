@@ -39,7 +39,7 @@ def fix_species(species_col):
                                 "kiler_whale": "killer_whale",
                                 "bottlenose_dolpin": "bottlenose_dolphin"})
 
-def train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_dataloader=None, lr_scheduler=None, device="cuda"):
+def train_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, device="cuda"):
     
     model.train()
     
@@ -49,9 +49,7 @@ def train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_data
         progress_bar.set_description(f"Epoch {epoch+1}".ljust(25))
         
         for step, batch in enumerate(progress_bar, 1):
-            # More efficient than optimizer.zero_grad()            
-            for p in model.parameters():
-                p.grad = None
+            
             
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
@@ -62,16 +60,20 @@ def train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_data
             logits = outputs["logits"]
             
             loss = criterion(logits, labels)
-
             loss.backward()
-            optimizer.step()
+            
+            if ((step + 1) % grad_accum_iter == 0) or (step + 1 == len(train_dataloader)):
+                optimizer.step()
+                # More efficient than optimizer.zero_grad()            
+                for p in model.parameters():
+                    p.grad = None
         
             batch_losses.append(loss.item())
             
             progress_bar.set_postfix({"train loss": np.array(batch_losses).mean()})
             
             if valid_dataloader and lr_scheduler and (step % cfg.scheduler_step) == 0 and step > 0:
-                val_loss, val_accuracy = validate(epoch, model, valid_dataloader, criterion, amp=False, scaler=None, disable_bar=True, device=cfg.device)
+                val_loss, val_accuracy = validate(epoch, model, valid_dataloader, criterion, disable_bar=True, device=cfg.device)
                 lr_scheduler.step(val_loss)
                 
         epoch_loss = np.array(batch_losses).mean()
@@ -87,11 +89,7 @@ def validate(epoch, model, dataloader, criterion, disable_bar=False, device="cud
     with tqdm(dataloader, unit="batch", bar_format='{l_bar}{bar:10}{r_bar}', disable=disable_bar) as progress_bar:
         progress_bar.set_description(f"Validation after epoch {epoch+1}".ljust(25))
         for batch in progress_bar:
-            
-            # More efficient than optimizer.zero_grad()            
-            for p in model.parameters():
-                p.grad = None
-            
+                       
             images = batch["image"].to(device)
             labels = batch["label"].to(device)
             
@@ -125,11 +123,11 @@ def duplicate_ones(dataset):
 class cfg:
     device = "cuda"
     epochs = 10
-    batch_size = 8
+    batch_size = 64
     num_classes = 5000
-    model_name = "tf_efficientnet_b5"
-    image_shape = (456, 456)
-    learning_rate = 0.0001
+    model_name = "tf_efficientnet_b0"
+    image_shape = (224, 224)
+    learning_rate = 0.001
     minimum_learning_rate = 1e-7
     embedding_dim = 1280
     scheduler_step = 10
@@ -178,12 +176,11 @@ if __name__ == '__main__':
                             lr=cfg.learning_rate)
          
     lr_scheduler = ReduceLROnPlateau(optimizer, min_lr=cfg.minimum_learning_rate, verbose=True)
-    scaler = torch.cuda.amp.GradScaler()
     
     best_val_acc = 0
     
     for epoch in range(cfg.epochs):
-        loss = train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_dataloader, None, device=cfg.device)
+        loss = train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_dataloader=valid_dataloader, grad_accum_iter=4, lr_scheduler=None, device=cfg.device)
         val_loss, val_accuracy = validate(epoch, model, valid_dataloader, criterion, device=cfg.device)
         
         if val_accuracy > best_val_acc:
