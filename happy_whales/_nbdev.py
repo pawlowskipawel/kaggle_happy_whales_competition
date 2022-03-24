@@ -2,18 +2,21 @@
 
 __all__ = ["index", "modules", "custom_doc_links", "git_url"]
 
-index = {"extract_top_n_classes": "data.ipynb",
+index = {"train_valid_split": "data.ipynb",
+         "extract_top_n_classes": "data.ipynb",
          "HappyWhalesDataset": "data.ipynb",
          "map_per_image": "metrics.ipynb",
          "map_per_set": "metrics.ipynb",
          "GeM": "models.ipynb",
          "Backbone": "models.ipynb",
          "ArcMarginProduct": "models.ipynb",
-         "HappyWhalesModel": "models.ipynb"}
+         "HappyWhalesModel": "models.ipynb",
+         "seed_everything": "utils.ipynb"}
 
 modules = ["data.py",
            "metrics.py",
-           "models.py"]
+           "models.py",
+           "utils.py"]
 
 doc_url = "https://pawlowskipawel.github.io/happy_whales/"
 
