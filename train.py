@@ -22,6 +22,7 @@ from happy_whales.metrics import *
 
 import random
 import pickle
+import h5py
 import glob
 import os
 
@@ -83,6 +84,7 @@ def train_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum
 
 @torch.no_grad()
 def validate(epoch, model, dataloader, criterion, disable_bar=False, device="cuda"):
+    model.eval()
     
     val_batch_losses = []
     val_batch_maps = []
@@ -104,7 +106,6 @@ def validate(epoch, model, dataloader, criterion, disable_bar=False, device="cud
             sorted_outputs, sorted_predictions = torch.sort(logits, descending=True)
             
             val_batch_losses.append(loss.item())
-            
             val_batch_maps.append(map_per_set(labels.cpu().tolist(), sorted_predictions.cpu().tolist()))
                         
             progress_bar.set_postfix({"validation loss": np.array(val_batch_losses).mean(), "validation map@5": np.array(val_batch_maps).mean()})
@@ -125,10 +126,10 @@ class cfg:
     device = "cuda"
     epochs = 10
     batch_size = 8
-    num_classes = 1000
+    num_classes = 15587
     model_name = "tf_efficientnet_b5"
     image_shape = (456, 456)
-    learning_rate = 0.001
+    learning_rate = 0.0001
     minimum_learning_rate = 1e-7
     embedding_dim = 1280
     scheduler_step = 10
@@ -137,9 +138,15 @@ class cfg:
 if __name__ == '__main__':
     seed_everything()
     
+    TRAIN_HDF5_IMGS = "data/train_456.h5"
     TRAIN_DATA_IMG_DIR = "data/train_images"
     TRAIN_DATA_ANNOTATION_PATH = "data/train.csv"
     
+    if TRAIN_HDF5_IMGS:
+        hdf5_data = h5py.File(TRAIN_HDF5_IMGS, 'r')
+    else:
+        hdf5_data = None
+        
     train_transforms = iaa.Sequential([
         iaa.Fliplr(0.5),
         iaa.Sometimes(0.3, iaa.Rotate((-10, 10))),
@@ -171,8 +178,8 @@ if __name__ == '__main__':
     
     #if not valid_df["individual_id"].isin(train_df["individual_id"].values).all():
     #    raise ValueError("aaaaaa")
-    train_dataset = HappyWhalesDataset(train_df, cfg.image_shape, transforms=train_transforms, bbox_dict=bbox_dict)
-    valid_dataset = HappyWhalesDataset(valid_df, cfg.image_shape, bbox_dict=bbox_dict)
+    train_dataset = HappyWhalesDataset(train_df, cfg.image_shape, transforms=train_transforms, bbox_dict=bbox_dict, hdf5=hdf5_data)
+    valid_dataset = HappyWhalesDataset(valid_df, cfg.image_shape, bbox_dict=bbox_dict, hdf5=hdf5_data)
     
     train_dataloader = DataLoader(train_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16, shuffle=True)
     valid_dataloader = DataLoader(valid_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16, shuffle=False)
@@ -180,9 +187,7 @@ if __name__ == '__main__':
     model = HappyWhalesModel(cfg.model_name, cfg.embedding_dim, cfg.num_classes).to(cfg.device)
     
     criterion = nn.CrossEntropyLoss()#ArcFaceLoss(crit="bce")
-    optimizer = optim.AdamW([{'params': model.parameters()}, 
-                             {'params': criterion.parameters()}], 
-                            lr=cfg.learning_rate)
+    optimizer = optim.AdamW(model.parameters(), lr=cfg.learning_rate)
          
     lr_scheduler = ReduceLROnPlateau(optimizer, min_lr=cfg.minimum_learning_rate, verbose=True)
     
@@ -190,12 +195,12 @@ if __name__ == '__main__':
     
     for epoch in range(cfg.epochs):
         loss = train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_dataloader=valid_dataloader, grad_accum_iter=2, lr_scheduler=None, device=cfg.device)
-        #if epoch > 5:
         val_loss, val_accuracy = validate(epoch, model, valid_dataloader, criterion, device=cfg.device)
-        #else:
-        #    val_accuracy = 0
+        
             
         if val_accuracy > best_val_acc:
             best_val_acc = val_accuracy
             
             torch.save(model.state_dict(), f"model.pth")
+    
+    hdf5_data.close()

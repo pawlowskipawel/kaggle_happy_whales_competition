@@ -36,9 +36,12 @@ def extract_top_n_classes(df, num_classes):
     return df
 
 # Cell
+import time
 class HappyWhalesDataset(Dataset):
-    def __init__(self, df, image_shape, bbox_dict=None, transforms=None, normalization='imagenet'):
+    def __init__(self, df, image_shape, bbox_dict=None, transforms=None, normalization='imagenet', hdf5=None):
         super().__init__()
+
+        self.hdf5_data = hdf5
 
         self.df = df
         self.normalization = normalization
@@ -68,14 +71,17 @@ class HappyWhalesDataset(Dataset):
         image_path = self.df.iloc[index, 0]
         image_name = os.path.split(image_path)[-1]
 
-        image = cv2.imread(image_path)
+        if self.hdf5_data is not None:
+            image = np.array(self.hdf5_data[image_name[:-4]])
+        else:
+            image = cv2.imread(image_path)
+            image = cv2.resize(image, self.image_shape)
 
-        if self.bbox_dict:
+        if self.hdf5_data is None and self.bbox_dict:
             bbox = self.bbox_dict[image_name]
             xmin, ymin, xmax, ymax = bbox
             image = image[ymin: ymax, xmin: xmax]
 
-        image = cv2.resize(image, self.image_shape)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         if self.transforms:
