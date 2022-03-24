@@ -108,12 +108,12 @@ class HappyWhalesModel(nn.Module):
 
         self.neck = nn.Sequential(
             nn.Dropout(.2),
-            nn.Linear(self.backbone.embedding_dim, self.embedding_dim, bias=False),
-            nn.BatchNorm1d(self.embedding_dim),
+            nn.Linear(self.backbone.embedding_dim, 512, bias=False),
+            nn.BatchNorm1d(512),
             nn.PReLU()
         )
 
-        self.head = ArcMarginProduct(self.embedding_dim, num_classes)
+        self.head = ArcMarginProduct(512, num_classes)
 
     def forward(self, x, label, return_embeddings=False):
         x = self.backbone(x)
