@@ -8,6 +8,7 @@ from torch.utils.data import DataLoader, Dataset
 from torch.nn.parameter import Parameter
 
 import torch.nn.functional as F
+import imgaug.augmenters as iaa
 import torch.optim as optim
 import torch.nn as nn
 import torch
@@ -123,10 +124,10 @@ def duplicate_ones(dataset):
 class cfg:
     device = "cuda"
     epochs = 10
-    batch_size = 64
-    num_classes = 5000
-    model_name = "tf_efficientnet_b0"
-    image_shape = (224, 224)
+    batch_size = 8
+    num_classes = 1000
+    model_name = "tf_efficientnet_b5"
+    image_shape = (456, 456)
     learning_rate = 0.001
     minimum_learning_rate = 1e-7
     embedding_dim = 1280
@@ -139,6 +140,12 @@ if __name__ == '__main__':
     TRAIN_DATA_IMG_DIR = "data/train_images"
     TRAIN_DATA_ANNOTATION_PATH = "data/train.csv"
     
+    train_transforms = iaa.Sequential([
+        iaa.Fliplr(0.5),
+        iaa.Sometimes(0.3, iaa.Rotate((-10, 10))),
+        iaa.Sometimes(0.3, iaa.PerspectiveTransform(scale=(0.01, 0.15)))
+    ])
+     
     dataset = pd.read_csv(TRAIN_DATA_ANNOTATION_PATH)
     dataset["species"] = fix_species(dataset["species"])
 
@@ -159,14 +166,16 @@ if __name__ == '__main__':
     
     dataset = extract_top_n_classes(dataset, cfg.num_classes)
     
-    #train_df, valid_df = train_test_split(dataset, test_size=.4, stratify=dataset["individual_id"])
-    train_df, valid_df = train_test_split(dataset, test_size=.5, stratify=dataset["individual_id"])
+    train_df, valid_df = train_valid_split(dataset)
+    #train_df, valid_df = train_test_split(dataset, test_size=.2, stratify=dataset["individual_id"])
     
-    train_dataset = HappyWhalesDataset(train_df, cfg.image_shape, bbox_dict=bbox_dict)
+    #if not valid_df["individual_id"].isin(train_df["individual_id"].values).all():
+    #    raise ValueError("aaaaaa")
+    train_dataset = HappyWhalesDataset(train_df, cfg.image_shape, transforms=train_transforms, bbox_dict=bbox_dict)
     valid_dataset = HappyWhalesDataset(valid_df, cfg.image_shape, bbox_dict=bbox_dict)
     
-    train_dataloader = DataLoader(train_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16)
-    valid_dataloader = DataLoader(valid_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16)
+    train_dataloader = DataLoader(train_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16, shuffle=True)
+    valid_dataloader = DataLoader(valid_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16, shuffle=False)
 
     model = HappyWhalesModel(cfg.model_name, cfg.embedding_dim, cfg.num_classes).to(cfg.device)
     
@@ -180,9 +189,12 @@ if __name__ == '__main__':
     best_val_acc = 0
     
     for epoch in range(cfg.epochs):
-        loss = train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_dataloader=valid_dataloader, grad_accum_iter=4, lr_scheduler=None, device=cfg.device)
+        loss = train_epoch(epoch, model, criterion, optimizer, train_dataloader, valid_dataloader=valid_dataloader, grad_accum_iter=2, lr_scheduler=None, device=cfg.device)
+        #if epoch > 5:
         val_loss, val_accuracy = validate(epoch, model, valid_dataloader, criterion, device=cfg.device)
-        
+        #else:
+        #    val_accuracy = 0
+            
         if val_accuracy > best_val_acc:
             best_val_acc = val_accuracy
             
