@@ -71,16 +71,19 @@ class HappyWhalesDataset(Dataset):
         image_path = self.df.iloc[index, 0]
         image_name = os.path.split(image_path)[-1]
 
+
         if self.hdf5_data is not None:
             image = np.array(self.hdf5_data[image_name[:-4]])
         else:
             image = cv2.imread(image_path)
-            image = cv2.resize(image, self.image_shape)
 
-        if self.hdf5_data is None and self.bbox_dict:
-            bbox = self.bbox_dict[image_name]
-            xmin, ymin, xmax, ymax = bbox
-            image = image[ymin: ymax, xmin: xmax]
+        if self.hdf5_data is None:
+            if self.bbox_dict:
+                bbox = self.bbox_dict[image_name]
+                xmin, ymin, xmax, ymax = bbox
+                image = image[ymin: ymax, xmin: xmax]
+
+            image = cv2.resize(image, self.image_shape)
 
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
