@@ -53,12 +53,13 @@ def extract_top_n_classes(df, num_classes):
 
 # Cell
 class HappyWhalesDataset(Dataset):
-    def __init__(self, df, image_shape, bbox_dict=None, transforms=None, normalization='imagenet', hdf5=None):
+    def __init__(self, df, image_shape, bbox_dict=None, transforms=None, normalization='imagenet', hdf5=None, mode="train"):
         super().__init__()
 
         self.hdf5_data = hdf5
 
         self.df = df
+        self.mode = mode
         self.normalization = normalization
         self.num_examples = len(df.index)
         self.image_shape = image_shape
@@ -85,7 +86,6 @@ class HappyWhalesDataset(Dataset):
 
         image_path = self.df.iloc[index, 0]
         image_name = os.path.split(image_path)[-1]
-
 
         if self.hdf5_data is not None:
             image = np.array(self.hdf5_data[image_name[:-4]])
@@ -115,4 +115,7 @@ class HappyWhalesDataset(Dataset):
             "image": torch.tensor(image, dtype=torch.float).permute(2, 0, 1),
             "species": torch.tensor(species, dtype=torch.long),
             "label": torch.tensor(label, dtype=torch.long)
+        } if self.mode == "train" else {
+            "image": torch.tensor(image, dtype=torch.float).permute(2, 0, 1),
+            "label": torch.tensor(-1, dtype=torch.long)
         }
