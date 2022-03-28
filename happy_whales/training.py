@@ -27,7 +27,7 @@ def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_a
 
         for step, batch in enumerate(progress_bar, 1):
 
-            batch_loss = train_one_step(model, batch, criterion, optimizer, device)
+            batch_loss = train_one_step(model, batch, criterion, device)
 
             total_loss += batch_loss.item()
 
