@@ -86,6 +86,7 @@ if __name__ == '__main__':
         optimizer=optimizer, 
         max_lr=cfg.max_lr,
         steps_per_epoch=len(train_dataloader),
+        epochs=cfg.epochs,
         verbose=True, 
     )
     
@@ -101,7 +102,7 @@ if __name__ == '__main__':
             train_dataloader=train_dataloader, 
             grad_accum_iter=cfg.grad_accum_iter, 
             valid_dataloader=valid_dataloader, 
-            lr_scheduler=None, 
+            lr_scheduler=lr_scheduler, 
             device=cfg.device
         )
         
