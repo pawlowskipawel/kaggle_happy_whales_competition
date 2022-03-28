@@ -15,9 +15,9 @@ settings.ini
 nbs/
 data/
 Makefile
-model*
+*model*
 label*
-
+docs/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
