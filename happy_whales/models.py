@@ -112,8 +112,22 @@ class HappyWhalesModel(nn.Module):
             nn.BatchNorm1d(512),
             nn.PReLU()
         )
+        self.neck.apply(self._init_weights)
 
         self.head = ArcMarginProduct(512, num_classes)
+
+    def _init_weights(self, module):
+        module_name = module.__class__.__name__
+
+        if module_name.find('Conv') != -1 or module_name.find('Linear') != -1:
+
+            torch.nn.init.normal_(module.weight, 0.0, 0.02)
+            if module.bias is not None:
+                torch.nn.init.zeros_(module.bias)
+
+        elif module_name.find('BatchNorm') != -1:
+            torch.nn.init.normal_(module.weight, 1.0, 0.02)
+            torch.nn.init.zeros_(module.bias)
 
     def forward(self, x, label, return_embeddings=False):
         x = self.backbone(x)
