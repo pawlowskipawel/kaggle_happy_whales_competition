@@ -16,7 +16,7 @@ def scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar
 
 
 # Cell
-def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, scheduler_step=500, device="cuda"):
+def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, device="cuda"):
 
     model.train()
 
@@ -40,10 +40,12 @@ def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_a
                 for p in model.parameters():
                     p.grad = None
 
+                if lr_scheduler: lr_scheduler.step()
+
             progress_bar.set_postfix({"train loss": total_loss / step})
 
-            if valid_dataloader and lr_scheduler and (step % scheduler_step) == 0 and step > 0:
-                scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar=True, device="cuda")
+            # if valid_dataloader and lr_scheduler and (step % scheduler_step) == 0 and step > 0:
+            #     scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar=True, device="cuda")
 
     total_loss /= len(train_dataloader)
 
@@ -74,7 +76,7 @@ def validate_one_epoch(epoch, model, dataloader, criterion, disable_bar=False, d
 
         for step, batch in enumerate(progress_bar, 1):
 
-            batch_loss, batch_map = validate_one_step(model, batch, criterion, disable_bar, device)
+            batch_loss, batch_map = validate_one_step(model, batch, criterion, device)
 
             total_valid_loss += batch_loss.item()
             total_valid_map += batch_map
@@ -87,7 +89,7 @@ def validate_one_epoch(epoch, model, dataloader, criterion, disable_bar=False, d
     return total_valid_loss, total_valid_map
 
 # Cell
-def validate_one_step(model, batch, criterion, disable_bar, device):
+def validate_one_step(model, batch, criterion, device):
     images = batch["image"].to(device)
     labels = batch["label"].to(device)
 

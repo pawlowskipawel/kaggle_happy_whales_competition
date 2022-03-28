@@ -1,7 +1,7 @@
 import pandas as pd
 import numpy as np
 
-from torch.optim.lr_scheduler import ReduceLROnPlateau
+from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR
 from torch.utils.data import DataLoader
 
 import imgaug.augmenters as iaa
@@ -32,6 +32,7 @@ class cfg:
     embedding_dim = 1280
     scheduler_step = 1000
     find_lr = True
+    max_lr = 0.01
     
 if __name__ == '__main__':
     seed_everything()
@@ -78,9 +79,15 @@ if __name__ == '__main__':
     model = HappyWhalesModel(cfg.model_name, cfg.embedding_dim, cfg.num_classes).to(cfg.device)
     
     criterion = ArcFaceLoss()#FocalLoss()#nn.CrossEntropyLoss()
-    optimizer = optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.000001)
+    optimizer = optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=1e-6)
          
-    lr_scheduler = ReduceLROnPlateau(optimizer, min_lr=cfg.minimum_learning_rate, verbose=True, patience=5)
+    #lr_scheduler = ReduceLROnPlateau(optimizer, min_lr=cfg.minimum_learning_rate, verbose=True, patience=5)
+    lr_scheduler = OneCycleLR(
+        optimizer=optimizer, 
+        max_lr=cfg.max_lr,
+        steps_per_epoch=len(train_dataloader),
+        verbose=True, 
+    )
     
     best_valid_map = 0
     best_valid_loss = np.inf
@@ -109,12 +116,12 @@ if __name__ == '__main__':
         if valid_map > best_valid_map:
             best_valid_map = valid_map
             
-            torch.save(model.state_dict(), f"best_map_model_V2.pth")
+            torch.save(model.state_dict(), f"best_map_model.pth")
         
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
             
-            torch.save(model.state_dict(), f"best_loss_model_V2.pth")
+            torch.save(model.state_dict(), f"best_loss_model.pth")
     
     if hdf5_data:
         hdf5_data.close()
