@@ -110,7 +110,7 @@ class HappyWhalesDataset(Dataset):
         if self.normalization:
             image = self._normalize_image(image)
 
-        if self.model == "train":
+        if self.mode == "train":
             label = self.df.iloc[index, 2]
             species = self.df.iloc[index, 1]
 
