@@ -16,7 +16,7 @@ def scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar
 
 
 # Cell
-def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, device="cuda"):
+def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, scheduler_step=500, device="cuda"):
 
     model.train()
 
@@ -33,7 +33,7 @@ def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_a
 
             batch_loss.backward()
 
-            if ((step + 1) % grad_accum_iter == 0) or (step + 1 == len(train_dataloader)):
+            if ((step + 1) % grad_accum_iter == 0) or (step == len(train_dataloader)):
                 optimizer.step()
 
                 # More efficient than optimizer.zero_grad()
@@ -42,7 +42,7 @@ def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_a
 
             progress_bar.set_postfix({"train loss": total_loss / step})
 
-            if valid_dataloader and lr_scheduler and (step % cfg.scheduler_step) == 0 and step > 0:
+            if valid_dataloader and lr_scheduler and (step % scheduler_step) == 0 and step > 0:
                 scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar=True, device="cuda")
 
     total_loss /= len(train_dataloader)

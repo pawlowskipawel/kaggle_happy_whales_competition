@@ -12,6 +12,7 @@ import torch
 from happy_whales.data import *
 from happy_whales.utils import *
 from happy_whales.models import *
+from happy_whales.losses import *
 from happy_whales.metrics import *
 from happy_whales.training import *
 
@@ -20,13 +21,13 @@ import h5py
 
 class cfg:
     device = "cuda"
-    epochs = 10
-    batch_size = 8
-    grad_accum_iter = 8
-    num_classes = 1000
-    model_name = "tf_efficientnet_b0"
-    image_shape = (224, 224)
-    learning_rate = 0.0001
+    epochs = 20
+    batch_size = 40
+    grad_accum_iter = 4
+    num_classes = 5000
+    model_name = "tf_efficientnet_b3"
+    image_shape = (300, 300)
+    learning_rate = 0.0002
     minimum_learning_rate = 1e-7
     embedding_dim = 1280
     scheduler_step = 1000
@@ -35,18 +36,23 @@ class cfg:
 if __name__ == '__main__':
     seed_everything()
     
-    TRAIN_HDF5_IMGS = None#"data/train_456.h5"
+    TRAIN_HDF5_IMGS = "data/train_456.h5"
     TRAIN_DATA_IMG_DIR = "data/train_images"
     TRAIN_DATA_ANNOTATION_PATH = "data/train.csv"
     
     hdf5_data = h5py.File(TRAIN_HDF5_IMGS, 'r') if TRAIN_HDF5_IMGS else None
         
     train_transforms = iaa.Sequential([
+        iaa.Resize(cfg.image_shape),
         iaa.Fliplr(0.5),
         iaa.Sometimes(0.3, iaa.Rotate((-10, 10))),
-        iaa.Sometimes(0.3, iaa.PerspectiveTransform(scale=(0.01, 0.15)))
+        iaa.Sometimes(0.3, iaa.PerspectiveTransform(scale=(0.01, 0.2)))
     ])
-     
+    
+    valid_transforms = iaa.Sequential([
+        iaa.Resize(cfg.image_shape)
+    ])
+    
     dataset = pd.read_csv(TRAIN_DATA_ANNOTATION_PATH)
     
     dataset["species"] = fix_species(dataset["species"])
@@ -64,14 +70,14 @@ if __name__ == '__main__':
     train_df, valid_df = train_valid_split(dataset)
     
     train_dataset = HappyWhalesDataset(train_df, cfg.image_shape, transforms=train_transforms, bbox_dict=bbox_dict, hdf5=hdf5_data)
-    valid_dataset = HappyWhalesDataset(valid_df, cfg.image_shape, bbox_dict=bbox_dict, hdf5=hdf5_data)
+    valid_dataset = HappyWhalesDataset(valid_df, cfg.image_shape, transforms=valid_transforms, bbox_dict=bbox_dict, hdf5=hdf5_data)
     
     train_dataloader = DataLoader(train_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16, shuffle=True, drop_last=True)
     valid_dataloader = DataLoader(valid_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=16, shuffle=False)
 
     model = HappyWhalesModel(cfg.model_name, cfg.embedding_dim, cfg.num_classes).to(cfg.device)
     
-    criterion = nn.CrossEntropyLoss()
+    criterion = ArcFaceLoss()#FocalLoss()#nn.CrossEntropyLoss()
     optimizer = optim.AdamW(model.parameters(), lr=cfg.learning_rate, weight_decay=0.000001)
          
     lr_scheduler = ReduceLROnPlateau(optimizer, min_lr=cfg.minimum_learning_rate, verbose=True, patience=5)
@@ -95,7 +101,7 @@ if __name__ == '__main__':
         valid_loss, valid_map = validate_one_epoch(
             epoch=epoch, 
             model=model, 
-            valid_dataloader=valid_dataloader, 
+            dataloader=valid_dataloader, 
             criterion=criterion, 
             device=cfg.device
         )
@@ -103,12 +109,12 @@ if __name__ == '__main__':
         if valid_map > best_valid_map:
             best_valid_map = valid_map
             
-            torch.save(model.state_dict(), f"best_map_model.pth")
+            torch.save(model.state_dict(), f"best_map_model_V2.pth")
         
         if valid_loss < best_valid_loss:
             best_valid_loss = valid_loss
             
-            torch.save(model.state_dict(), f"best_loss_model.pth")
+            torch.save(model.state_dict(), f"best_loss_model_V2.pth")
     
     if hdf5_data:
         hdf5_data.close()
