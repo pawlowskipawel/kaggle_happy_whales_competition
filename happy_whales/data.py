@@ -56,6 +56,8 @@ class HappyWhalesDataset(Dataset):
     def __init__(self, df, image_shape, bbox_dict=None, transforms=None, normalization='imagenet', hdf5=None, mode="train"):
         super().__init__()
 
+        assert mode in ("train", "inference"), "Wrong dataset mode."
+
         self.hdf5_data = hdf5
 
         self.df = df
@@ -108,8 +110,9 @@ class HappyWhalesDataset(Dataset):
         if self.normalization:
             image = self._normalize_image(image)
 
-        label = self.df.iloc[index, 2]
-        species = self.df.iloc[index, 1]
+        if self.model == "train":
+            label = self.df.iloc[index, 2]
+            species = self.df.iloc[index, 1]
 
         return {
             "image": torch.tensor(image, dtype=torch.float).permute(2, 0, 1),
