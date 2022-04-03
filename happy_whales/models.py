@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch
 import timm
-import math
 
 # Cell
 class GeM(nn.Module):
@@ -47,6 +46,8 @@ class Backbone(nn.Module):
 
         if "efficientnet" in name:
             self.embedding_dim = self.net.classifier.in_features
+        elif "convnext" in name:
+            self.embedding_dim = self.net.classifier.in_features
         else:
             raise AttributeError("Wrong backbone name!")
 
@@ -55,30 +56,32 @@ class Backbone(nn.Module):
 
 # Cell
 class HappyWhalesModel(nn.Module):
-    def __init__(self, model_name, embedding_dim, num_classes):
+    def __init__(self, model_name, output_embedding_dim, num_classes):
         super().__init__()
 
-        self.embedding_dim = embedding_dim
         self.model_name = model_name
+        self.output_embedding_dim = output_embedding_dim
 
         self.backbone = Backbone(self.model_name, pretrained=True)
 
-        self.pre_neck = nn.Sequential(
-            nn.BatchNorm2d(self.backbone.embedding_dim),
-            nn.PReLU(),
-            nn.Dropout(.2)
-        )
+        #self.pre_neck = nn.Sequential(
+        #    nn.BatchNorm2d(self.backbone.embedding_dim),
+        #    nn.PReLU(),
+        #    nn.Dropout(.2)
+        #)
+
+        #self.pre_neck.apply(self._init_weights)
 
         self.global_pool = GeM()
 
         self.neck = nn.Sequential(
-            nn.Linear(self.backbone.embedding_dim, 512, bias=False),
-            nn.BatchNorm1d(512),
-            nn.PReLU()
+            nn.BatchNorm1d(1280),
+            nn.Linear(self.backbone.embedding_dim, self.output_embedding_dim),
+            nn.Dropout(.5)
         )
         self.neck.apply(self._init_weights)
 
-        self.head = ArcMarginProduct(512, num_classes)
+        self.head = ArcMarginProduct(self.output_embedding_dim, num_classes)
 
     def _init_weights(self, module):
         module_name = module.__class__.__name__
@@ -93,14 +96,14 @@ class HappyWhalesModel(nn.Module):
             torch.nn.init.normal_(module.weight, 1.0, 0.01)
             torch.nn.init.zeros_(module.bias)
 
-    def forward(self, x, label, return_embeddings=False):
+    def forward(self, x, return_embeddings=False):
+
         x = self.backbone(x)
-        x = self.pre_neck(x)
+
         x = self.global_pool(x)
         x = x.flatten(1)
 
         x = self.neck(x)
-
         logits = self.head(x)
 
         if return_embeddings:
