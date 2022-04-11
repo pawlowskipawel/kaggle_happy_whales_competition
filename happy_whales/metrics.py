@@ -20,30 +20,24 @@ class TopKAccuracy:
         self._total = 0
 
     @torch.no_grad()
-    def compute(self, output, target):
+    def compute(self, output, labels):
         output = output.to(self._device)
-        target = target.to(self._device)
+        labels = labels.to(self._device)
 
         _, pred = output.topk(self._k, 1)
         pred = pred[:, :self._k]
-        print(pred)
-        expanded_y = target.view(-1, 1).expand(-1, self._k)
-        print(expanded_y)
-        correct = torch.sum(torch.eq(pred, expanded_y), dim=1)
-        print(correct)
+        expanded_labels = labels.view(-1, 1).expand(-1, self._k)
 
-        correct = pred.isin(target.view(-1, 1))
+        correct = torch.sum(torch.eq(pred, expanded_labels), dim=1)
 
-        print(correct)
-        #self._correct +=
-        self._total += target.size(0)
+        self._correct += correct.sum().item()
+        self._total += labels.size(0)
 
-    @torch.no_grad()
     def update(self, output, target):
         self.compute(output, target)
 
     def get_metric(self):
-        return self._correct.item() / self._total
+        return self._correct / self._total
 
 # Cell
 def map_per_image(label, predictions):

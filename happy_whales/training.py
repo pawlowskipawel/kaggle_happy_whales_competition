@@ -3,7 +3,7 @@
 __all__ = ['scheduler_step', 'train_one_epoch', 'train_one_step', 'validate_one_epoch', 'validate_one_step']
 
 # Cell
-from .metrics import map_per_set
+from .metrics import TopKAccuracy, map_per_set
 from tqdm import tqdm
 import numpy as np
 import torch
@@ -16,89 +16,127 @@ def scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar
 
 
 # Cell
-def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, device="cuda"):
+def train_one_epoch(epoch, model, criterion, optimizer, train_dataloader, grad_accum_iter=1, valid_dataloader=None, lr_scheduler=None, species_criterion=None, device="cuda"):
 
     model.train()
 
     total_loss = 0
+
+    metrics_dict = {
+        "acc": TopKAccuracy(k=1),
+        "acc@5": TopKAccuracy(k=5)
+    }
 
     with tqdm(train_dataloader, unit="batch", bar_format='{l_bar}{bar:10}{r_bar}') as progress_bar:
         progress_bar.set_description(f"Epoch {epoch+1}".ljust(25))
 
         for step, batch in enumerate(progress_bar, 1):
 
-            batch_loss = train_one_step(model, batch, criterion, device)
+            batch_loss = train_one_step(model, batch, criterion, species_criterion, metrics_dict, device)
+            batch_loss.backward()
 
             total_loss += batch_loss.item()
 
-            batch_loss.backward()
-
-            if ((step + 1) % grad_accum_iter == 0) or (step == len(train_dataloader)):
+            if (step % grad_accum_iter == 0) or (step == len(train_dataloader)):
                 optimizer.step()
 
                 # More efficient than optimizer.zero_grad()
                 for p in model.parameters():
                     p.grad = None
 
-                if lr_scheduler: lr_scheduler.step()
+                if lr_scheduler is not None: lr_scheduler.step()
 
-            progress_bar.set_postfix({"train loss": total_loss / step})
-
-            # if valid_dataloader and lr_scheduler and (step % scheduler_step) == 0 and step > 0:
-            #     scheduler_step(model, lr_scheduler, valid_dataloader, criterion, disable_bar=True, device="cuda")
+            progress_bar.set_postfix(
+                {
+                    "train loss": f"{(total_loss / step):.3f}",
+                    **{metric_name: f"{metric.get_metric():.3f}" for metric_name, metric in metrics_dict.items()}
+                }
+            )
 
     total_loss /= len(train_dataloader)
 
     return total_loss
 
 # Cell
-def train_one_step(model, batch, criterion, device="cuda"):
+def train_one_step(model, batch, criterion, species_criterion, metrics_dict, device="cuda"):
     images = batch["image"].to(device)
     labels = batch["label"].to(device)
 
-    outputs = model(images, labels, return_embeddings=False)
+    if species_criterion is not None:
+        outputs = model(images, return_embeddings=False, return_species=True)
+    else:
+        outputs = model(images, return_embeddings=False)
 
     logits = outputs["logits"]
+
+    if metrics_dict is not None:
+        for _, metric in metrics_dict.items():
+            metric.update(logits, labels)
+
     step_loss = criterion(logits, labels)
+
+
+    if species_criterion is not None:
+        labels_species = batch["species"].to(device)
+        species_logits = outputs["species_logits"]
+        species_loss = species_criterion(species_logits, labels_species)
+
+        step_loss += species_loss
 
     return step_loss
 
 # Cell
 @torch.no_grad()
-def validate_one_epoch(epoch, model, dataloader, criterion, disable_bar=False, device="cuda"):
+def validate_one_epoch(epoch, model, dataloader, criterion, species_criterion=None, disable_bar=False, device="cuda"):
     model.eval()
 
     total_valid_loss = 0
-    total_valid_map = 0
+    metrics_dict = {
+        "acc": TopKAccuracy(k=1),
+        "acc@5": TopKAccuracy(k=5)
+    }
 
     with tqdm(dataloader, unit="batch", bar_format='{l_bar}{bar:10}{r_bar}', disable=disable_bar) as progress_bar:
         progress_bar.set_description(f"Validation after epoch {epoch+1}".ljust(25))
 
         for step, batch in enumerate(progress_bar, 1):
 
-            batch_loss, batch_map = validate_one_step(model, batch, criterion, device)
+            total_valid_loss += validate_one_step(model, batch, criterion, metrics_dict, species_criterion, device)
 
-            total_valid_loss += batch_loss.item()
-            total_valid_map += batch_map
-
-            progress_bar.set_postfix({"validation loss": total_valid_loss / step, "validation map@5": total_valid_map / step})
+            progress_bar.set_postfix(
+                {
+                    "valid loss": f"{(total_valid_loss / step):.3f}",
+                    **{metric_name: f"{metric.get_metric():.3f}" for metric_name, metric in metrics_dict.items()}
+                }
+            )
 
     total_valid_loss /= len(dataloader)
-    total_valid_map /= len(dataloader)
 
-    return total_valid_loss, total_valid_map
+    return total_valid_loss
 
 # Cell
-def validate_one_step(model, batch, criterion, device):
+def validate_one_step(model, batch, criterion, metrics_dict, species_criterion, device):
     images = batch["image"].to(device)
     labels = batch["label"].to(device)
 
-    outputs = model(images, labels, return_embeddings=False)
+    if species_criterion is not None:
+        outputs = model(images, return_embeddings=False, return_species=True)
+    else:
+        outputs = model(images, return_embeddings=False)
+
     logits = outputs["logits"]
+
+    if metrics_dict is not None:
+        for _, metric in metrics_dict.items():
+            metric.update(logits, labels)
 
     step_loss = criterion(logits, labels)
 
-    _, sorted_predictions = torch.sort(logits, descending=True)
-    step_map = map_per_set(labels.cpu().tolist(), sorted_predictions.cpu().tolist())
+    if species_criterion is not None:
+        labels_species = batch["species"].to(device)
+        species_logits = outputs["species_logits"]
+        species_loss = species_criterion(species_logits, labels_species)
 
-    return step_loss, step_map
+        step_loss += species_loss
+
+    return step_loss.item()
