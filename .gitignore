@@ -24,6 +24,7 @@ _nbdev*
 __pycache__/
 *.py[cod]
 *$py.class
+setup.py
 
 # C extensions
 *.so
