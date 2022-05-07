@@ -1,31 +1,21 @@
-from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
-from torch.optim.lr_scheduler import ReduceLROnPlateau, OneCycleLR, CyclicLR
-from sklearn.model_selection import train_test_split
+from happy_whales.training import HappyWhalesTrainer, get_optimizer, get_scheduler
+from happy_whales.utils import load_label_encoder
+from happy_whales.models import HappyWhalesModel
+from happy_whales.data import HappyWhalesDataset
+from happy_whales.losses import ArcFaceLoss
+from happy_whales.conf import parse_cfg
 from torch.utils.data import DataLoader
-
-import imgaug.augmenters as iaa
-import torch.optim as optim
-import torch.nn as nn
-import torch
 
 import pandas as pd
 import numpy as np
 
-from happy_whales.conf import *
-from happy_whales.data import *
-from happy_whales.utils import *
-from happy_whales.models import *
-from happy_whales.losses import *
-from happy_whales.metrics import *
-from happy_whales.training import *
-
-import pickle
 import random
-import sys
+import pickle
+import torch
+import wandb
 import os
 import gc
 
-sys.path.append("./configs")
 
 def seed_everything(seed=7777):
     random.seed(seed)
@@ -35,119 +25,104 @@ def seed_everything(seed=7777):
     torch.cuda.manual_seed(seed)
     torch.backends.cudnn.deterministic = True
     
-if __name__ == '__main__':
-    seed_everything()
-    cfg = parse_cfg()
 
+if __name__ == "__main__":
+    seed_everything()
+    cfg, wandb_log = parse_cfg()
+    
     label_encoder_id = load_label_encoder("label_encoders/id_label_encoder.pickle")
     label_encoder_species = load_label_encoder("label_encoders/species_label_encoder.pickle")
     
-    dataset = pd.read_csv(cfg.TRAIN_DATA_ANNOTATION_PATH)
-    dataset["species"] = fix_species(dataset["species"])
-    dataset["image"] = cfg.TRAIN_DATA_IMG_DIR + '/' + dataset["image"]
+    df = pd.read_csv(cfg.TRAIN_DATA_ANNOTATION_PATH)
+    bbox_dict = pickle.load(open(cfg.bbox_path, "rb")) if cfg.bbox_path is not None else None
     
-    dataset["individual_id"] = label_encoder_id.transform(dataset["individual_id"])
-    dataset["species"] = label_encoder_species.transform(dataset["species"])
+    df["individual_id"] = label_encoder_id.transform(df["individual_id"])
+    df["species"] = label_encoder_species.transform(df["species"])
     
-    dataset = extract_top_n_classes(dataset, cfg.num_classes)
-
-    if cfg.bbox_path:
-        bbox_dict = pickle.load(open(cfg.bbox_path, "rb"))
+    loss_list = []
     
-    for fold_i in range(len(dataset["fold"].unique())):
-            
-        print(f"FOLD: {fold_i}")
-        cfg.output_prefix = f"fold{fold_i}_{cfg.output_prefix_base}"
+    for fold_i in range(len(df["fold"].unique())): 
+        if cfg.fold_to_run is not None:
+            fold_i = cfg.fold_to_run
         
-        train_df = dataset[dataset["fold"] != fold_i].drop("fold", axis=1).reset_index(drop=True)
-        valid_df = dataset[dataset["fold"] == fold_i].drop("fold", axis=1).reset_index(drop=True)
+        print(f"---- FOLD {fold_i} ----")
         
-        train_df.to_csv(f"data/train_df_fold_{fold_i}.csv", index=False)
-        valid_df.to_csv(f"data/valid_df_fold_{fold_i}.csv", index=False)
+        train_df = df[df["fold"] != fold_i].drop("fold", axis=1)
+        valid_df = df[df["fold"] == fold_i].drop("fold", axis=1)
         
-        new_individual_ids = set(valid_df["individual_id"]) - set(train_df["individual_id"])
-        valid_df = valid_df[~valid_df["individual_id"].isin(new_individual_ids)]
+        train_dataset = HappyWhalesDataset(
+            df=train_df, 
+            transforms=cfg.train_transforms,
+            mode="train_val", 
+            normalization=cfg.normalization,
+            bbox_dict=bbox_dict
+        )
         
-        train_dataset = HappyWhalesDataset(train_df, transforms=cfg.train_transforms)
-        valid_dataset = HappyWhalesDataset(valid_df, transforms=cfg.valid_transforms)
+        valid_dataset = HappyWhalesDataset(
+            df=valid_df,
+            transforms=cfg.valid_transforms,
+            mode="train_val",
+            normalization=cfg.normalization,
+            bbox_dict=bbox_dict
+        )
         
         train_dataloader = DataLoader(train_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=12, shuffle=True, drop_last=True)
         valid_dataloader = DataLoader(valid_dataset, batch_size=cfg.batch_size, pin_memory=True, num_workers=12, shuffle=False)
-
-        if cfg.from_checkpoint:
-            model = HappyWhalesModel.from_checkpoint(cfg.model_name, cfg.checkpoint_path, cfg.output_embedding_dim, cfg.num_classes)
-            print(f"Model loaded from {cfg.checkpoint_path}")
-        else:
-            model = HappyWhalesModel(cfg.model_name, cfg.output_embedding_dim, cfg.num_classes, dropout=cfg.dropout)
-            
+        
+        model = HappyWhalesModel(
+            model_name=cfg.model_name,
+            output_embedding_dim=cfg.output_embedding_dim, 
+            num_classes=cfg.num_classes, 
+            dropout=cfg.dropout, 
+            freeze_backbone_batchnorm=cfg.freeze_backbone_batchnorm,
+            add_species_head=bool(cfg.criterion_species)
+        )
         model.to(cfg.device)
         
-        criterion = ArcFaceLoss(s=cfg.s, 
-                                m=cfg.m, 
-                                crit=cfg.crit)
+        if wandb_log:
+            wandb.watch(model)
         
-        species_criterion = None#ArcFaceLoss(s=cfg.s, 
-                                       # m=cfg.m, 
-                                       # crit=cfg.crit)
+        optimizer = get_optimizer(
+            optimizer_name=cfg.optimizer_name,
+            model=model,
+            learning_rate=cfg.learning_rate,
+            weight_decay=cfg.weight_decay
+        )
         
-        optimizer = optim.Adam(list(model.parameters()) + list(criterion.parameters()), 
-                               lr=cfg.learning_rate, 
-                               weight_decay=cfg.weight_decay)
+        criterion = ArcFaceLoss(s=cfg.arc_s, m=cfg.arc_m, crit=cfg.arc_crit)
+        criterion_species = ArcFaceLoss(s=cfg.arc_s, m=cfg.arc_m, crit=cfg.arc_crit) if cfg.criterion_species is not None else None
         
-        #optimizer = optim.SGD([{'params': model.parameters()}, {'params': criterion.parameters()}], 
-        #                      lr=cfg.learning_rate, 
-        #                      momentum=0.9, 
-        #                      nesterov=True, 
-        #                      weight_decay=cfg.weight_decay)
+        lr_scheduler = get_scheduler(cfg, optimizer, len(train_dataloader))
         
+        trainer = HappyWhalesTrainer(
+            model_name=cfg.model_name, 
+            model=model, 
+            criterion=criterion, 
+            optimizer=optimizer, 
+            lr_scheduler=lr_scheduler, 
+            metrics_dict=cfg.metrics_dict, 
+            grad_accum_iter=cfg.grad_accum_iter, 
+            wandb_log=wandb_log, 
+            criterion_species=criterion_species, 
+            device=cfg.device
+        )
         
-        lr_scheduler = get_cosine_schedule_with_warmup(optimizer, 
-                                                       num_warmup_steps=len(train_dataloader), 
-                                                       num_training_steps=int(len(train_dataloader) * (cfg.epochs)))
+        fold_loss = trainer.fit(
+            epochs=cfg.epochs,
+            train_dataloader=train_dataloader,
+            valid_dataloader=valid_dataloader,
+            save_path=cfg.save_path,
+            fold_i=fold_i
+        )
         
-        best_valid_loss = np.inf
-        best_train_loss = np.inf
-        if cfg.output_prefix is not None:
-            output_path = f"{cfg.output_prefix}_{cfg.model_name}_best_loss.pth"
-        else:
-            output_path = f"{cfg.model_name}_best_loss.pth"
-            
-        for epoch in range(cfg.epochs):
-            train_loss = train_one_epoch(
-                epoch=epoch, 
-                model=model, 
-                criterion=criterion,
-                species_criterion=species_criterion,
-                optimizer=optimizer, 
-                train_dataloader=train_dataloader, 
-                grad_accum_iter=cfg.grad_accum_iter, 
-                valid_dataloader=valid_dataloader, 
-                lr_scheduler=lr_scheduler, 
-                device=cfg.device
-            )
-            
-            valid_loss = validate_one_epoch(
-                epoch=epoch, 
-                model=model, 
-                dataloader=valid_dataloader, 
-                criterion=criterion, 
-                species_criterion=species_criterion,
-                device=cfg.device
-            )
-            
-            if valid_loss < best_valid_loss:
-                best_valid_loss = valid_loss
-                
-                torch.save(model.state_dict(), f"trained_models/valid_{output_path}")
-            
-            if train_loss < best_train_loss:
-                best_train_loss = train_loss
-                
-                torch.save(model.state_dict(), f"trained_models/train_{output_path}")
-            
-        del model, criterion, optimizer, lr_scheduler
+        loss_list.append(fold_loss)
+        
+        del model, criterion, optimizer, lr_scheduler, trainer
         torch.cuda.empty_cache()
         gc.collect()
-        print()
-        break
+        
+        if cfg.fold_to_run is not None:
+            break
     
+    if wandb_log:
+        wandb.run.summary["cv_loss"] = np.array(loss_list).mean()

@@ -21,11 +21,6 @@ class GeM(nn.Module):
     def gem(self, x, p=3, eps=1e-6):
         return F.avg_pool2d(x.clamp(min=eps).pow(p), (x.size(-2), x.size(-1))).pow(1./p)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' + 'p=' + '{:.4f}'.format(self.p.data.tolist()[0]) + ', ' + 'eps=' + str(self.eps) + ')'
-
-
-
 # Cell
 class ArcMarginProduct(nn.Module):
     def __init__(self, in_features, out_features):
@@ -43,70 +38,82 @@ class Backbone(nn.Module):
         super().__init__()
 
         self.net = timm.create_model(name, pretrained=pretrained)
-
-        if "efficientnet" in name:
-            self.embedding_dim = self.net.classifier.in_features
-        elif "convnext" in name:
-            self.embedding_dim = self.net.classifier.in_features
-        else:
-            raise AttributeError("Wrong backbone name!")
+        self.embedding_dim = self.net.get_classifier().in_features
 
     def forward(self, x):
         return self.net.forward_features(x)
 
 # Cell
 class HappyWhalesModel(nn.Module):
-    def __init__(self, model_name, output_embedding_dim, num_classes):
+    def __init__(self, model_name, output_embedding_dim, num_classes, dropout=.3, freeze_backbone_batchnorm=False, add_species_head=False):
         super().__init__()
 
         self.model_name = model_name
+        self.add_species_head = add_species_head
         self.output_embedding_dim = output_embedding_dim
 
         self.backbone = Backbone(self.model_name, pretrained=True)
 
-        #self.pre_neck = nn.Sequential(
-        #    nn.BatchNorm2d(self.backbone.embedding_dim),
-        #    nn.PReLU(),
-        #    nn.Dropout(.2)
-        #)
-
-        #self.pre_neck.apply(self._init_weights)
+        if freeze_backbone_batchnorm:
+            for name, child in (self.backbone.named_children()):
+                if name.find('BatchNorm') != -1:
+                    for param in child.parameters():
+                        param.requires_grad = True
 
         self.global_pool = GeM()
 
         self.neck = nn.Sequential(
-            nn.BatchNorm1d(1280),
-            nn.Linear(self.backbone.embedding_dim, self.output_embedding_dim),
-            nn.Dropout(.5)
+            nn.BatchNorm1d(self.backbone.embedding_dim),
+            nn.Dropout(dropout),
+            nn.Linear(self.backbone.embedding_dim, self.output_embedding_dim, bias=True),
         )
-        self.neck.apply(self._init_weights)
 
         self.head = ArcMarginProduct(self.output_embedding_dim, num_classes)
 
+        self.neck.apply(self._init_weights)
+        self.head.apply(self._init_weights)
+
+        if self.add_species_head:
+            self.head_species = ArcMarginProduct(self.output_embedding_dim, 26)
+            self.head_species.apply(self._init_weights)
+
+    @classmethod
+    def from_checkpoint(cls, pretrained_model_name, checkpoint_path, output_embedding_dim, num_classes):
+        state_dict = torch.load(checkpoint_path, map_location='cpu')
+        model = cls(pretrained_model_name, output_embedding_dim, num_classes)
+        model.load_state_dict(state_dict)
+        return model
+
     def _init_weights(self, module):
-        module_name = module.__class__.__name__
-
-        if module_name.find('Conv') != -1 or module_name.find('Linear') != -1:
-
+        if isinstance(module, nn.Linear):
             torch.nn.init.normal_(module.weight, 0.0, 0.01)
             if module.bias is not None:
                 torch.nn.init.zeros_(module.bias)
 
-        elif module_name.find('BatchNorm') != -1:
+        elif isinstance(module, nn.LayerNorm) or isinstance(module, nn.BatchNorm1d):
             torch.nn.init.normal_(module.weight, 1.0, 0.01)
             torch.nn.init.zeros_(module.bias)
 
     def forward(self, x, return_embeddings=False):
 
         x = self.backbone(x)
-
         x = self.global_pool(x)
-        x = x.flatten(1)
 
-        x = self.neck(x)
-        logits = self.head(x)
+        x = x[:,:,0,0]
+
+        embeddings = self.neck(x)
+
+        logits = self.head(embeddings)
+
+        output = {}
+        output['logits'] = logits
 
         if return_embeddings:
-            return {'logits': logits, 'embeddings': x}
-        else:
-            return {'logits': logits}
+            output['embeddings'] = embeddings
+
+        if self.add_species_head:
+            species_logits = self.head_species(embeddings)
+            output['species_logits'] = species_logits
+
+        return output
+

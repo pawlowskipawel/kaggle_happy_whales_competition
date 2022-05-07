@@ -9,12 +9,12 @@ import math
 
 # Cell
 class FocalLoss(nn.Module):
-    def __init__(self, gamma=0.25, eps=1e-7):
+    def __init__(self, gamma=0.25, eps=1e-7, reduction="none"):
         super().__init__()
 
         self.gamma = gamma
         self.eps = eps
-        self.cross_entropy = nn.CrossEntropyLoss(reduction="none")
+        self.cross_entropy = nn.CrossEntropyLoss(reduction=reduction)
 
     def forward(self, input, target):
         ce_loss = self.cross_entropy(input, target)
@@ -25,7 +25,7 @@ class FocalLoss(nn.Module):
 
 # Cell
 class ArcFaceLoss(nn.Module):
-    def __init__(self, s, m, crit, easy_margin, label_smothing_eps=0):
+    def __init__(self, s, m, crit, easy_margin=False, label_smothing_eps=0):
         super().__init__()
 
         self.easy_margin = easy_margin
@@ -58,7 +58,6 @@ class ArcFaceLoss(nn.Module):
         else:
             phi = torch.where(cosine > self.th, phi, cosine - self.mm)
 
-        # label one hot encoding
         labels2 = torch.zeros_like(cosine)
         labels2.scatter_(1, labels.view(-1, 1).long(), 1)
 

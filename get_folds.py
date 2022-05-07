@@ -4,11 +4,10 @@ import argparse
 import random
 import os
 
-
 def parse_args():
     argparser = argparse.ArgumentParser()
     argparser.add_argument('--df', type=str, default='data/train.csv')
-    argparser.add_argument('--n-splits', type=int, default=5)
+    argparser.add_argument('--nsplits', type=int, default=5)
     argparser.add_argument('--stratify', type=str, default=None)
 
     return argparser.parse_args()
@@ -25,8 +24,10 @@ if __name__ == '__main__':
     dataset = pd.read_csv(args.df)
     dataset["species"] = fix_species(dataset["species"])
     
-    folds = get_folds(dataset, n_splits=args.n_splits, stratify=args.stratify)
+    folds = get_folds(dataset, n_splits=args.nsplits, stratify=args.stratify)
     
-    output = "stratified_train_folded.csv" if args.stratify else "train_folded.csv"
+    output = "stratified_train_folds.csv" if args.stratify else "train_folds.csv"
     
     folds.to_csv(f"data/{output}", index=False)
+    
+
